@@ -104,9 +104,11 @@ struct LeetCodeWidget: Widget {
             intent: LeetCodeWidgetIntent.self,
             provider: LeetCodeTimelineProvider()
         ) { entry in
-            LeetCodeWidgetEntryView(entry: entry)
-                .containerBackground(Color.clear, for: .widget)
+            Color.clear
                 .widgetURL(entry.dailyProblemURL)
+                .containerBackground(for: .widget) {
+                    LeetCodeWidgetEntryView(entry: entry)
+                }
         }
         .configurationDisplayName("LeetCode Heatmap")
         .description("Shows your LeetCode submission heatmap")

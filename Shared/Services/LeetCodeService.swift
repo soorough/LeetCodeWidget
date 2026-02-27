@@ -17,6 +17,44 @@ actor LeetCodeService {
     }
     """
 
+    /// Fetches a CSRF token from LeetCode by hitting the graphql endpoint with a GET.
+    private func fetchCSRFToken() async -> String? {
+        var request = URLRequest(url: graphqlURL)
+        request.httpMethod = "GET"
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", forHTTPHeaderField: "User-Agent")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie") {
+                // Parse csrftoken from "csrftoken=VALUE; ..."
+                for part in setCookie.components(separatedBy: ";") {
+                    let trimmed = part.trimmingCharacters(in: .whitespaces)
+                    if trimmed.hasPrefix("csrftoken=") {
+                        return String(trimmed.dropFirst("csrftoken=".count))
+                    }
+                }
+            }
+        } catch {}
+        return nil
+    }
+
+    private func makeRequest(body: [String: Any]) async throws -> (Data, URLResponse) {
+        let csrfToken = await fetchCSRFToken()
+
+        var request = URLRequest(url: graphqlURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://leetcode.com", forHTTPHeaderField: "Referer")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", forHTTPHeaderField: "User-Agent")
+        if let token = csrfToken {
+            request.setValue(token, forHTTPHeaderField: "x-csrftoken")
+            request.setValue("csrftoken=\(token)", forHTTPHeaderField: "Cookie")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        return try await URLSession.shared.data(for: request)
+    }
+
     func fetchCalendarData(username: String, year: Int? = nil) async throws -> LeetCodeCalendarData {
         let body: [String: Any] = [
             "query": query,
@@ -24,13 +62,7 @@ actor LeetCodeService {
                 ?? ["username": username]
         ]
 
-        var request = URLRequest(url: graphqlURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://leetcode.com", forHTTPHeaderField: "Referer")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await makeRequest(body: body)
 
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
@@ -96,13 +128,7 @@ actor LeetCodeService {
         let fallback = URL(string: "https://leetcode.com/problemset/")!
         do {
             let body: [String: Any] = ["query": dailyQuery, "variables": [:] as [String: Any]]
-            var request = URLRequest(url: graphqlURL)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("https://leetcode.com", forHTTPHeaderField: "Referer")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, _) = try await makeRequest(body: body)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let dataDict = json["data"] as? [String: Any],
                let challenge = dataDict["activeDailyCodingChallengeQuestion"] as? [String: Any],
